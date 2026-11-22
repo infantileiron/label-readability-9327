@@ -1,4 +1,5 @@
 from fastapi import HTTPException
+from psycopg.types.json import Jsonb
 
 from src.constants.enums import PAIR_LIMIT
 from src.services.audit import record
@@ -34,13 +35,30 @@ def add_study(db, data, actor):
                           (data['old_id'], data['new_id'])).fetchall()
     if len(versions) != 2 or versions[0]['exhibit'] != versions[1]['exhibit']:
         raise HTTPException(422, '请选择同一展品的两个已登记版本')
-    row = db.execute('''INSERT INTO studies(code, title, station, reading_task, old_id, new_id)
-                        VALUES (%(code)s, %(title)s, %(station)s, %(reading_task)s, %(old_id)s, %(new_id)s)
-                        ON CONFLICT (code) DO NOTHING RETURNING *''', data).fetchone()
+    row = db.execute('''INSERT INTO studies(code, title, station, reading_task, old_id, new_id, paper_totals)
+                        VALUES (%(code)s, %(title)s, %(station)s, %(reading_task)s,
+                                %(old_id)s, %(new_id)s, %(paper_totals)s)
+                        ON CONFLICT (code) DO NOTHING RETURNING *''',
+                     {**data, 'paper_totals': Jsonb(data['paper_totals'])}).fetchone()
     if not row:
         raise HTTPException(409, '复验批次编号已存在')
-    record(db, actor, 'study.created', row['code'])
+    record(db, actor, 'study.created', row['code'], {'paper_totals': data['paper_totals']})
     return row
+
+
+def set_paper_totals(db, study_id, paper_totals, actor, expected_revision):
+    """Update the paper-sheet totals; bumping the revision makes cached runs stale."""
+    study = get_study(db, study_id, lock=True)
+    if study['revision'] != expected_revision:
+        raise HTTPException(409, '批次已更新，请刷新配对记录后再提交')
+    if study['paper_totals'] == paper_totals:
+        return {'paper_totals': study['paper_totals'], 'revision': study['revision']}
+    before = study['paper_totals']
+    revision = db.execute('UPDATE studies SET paper_totals=%s, revision=revision+1 WHERE id=%s '
+                          'RETURNING revision', (Jsonb(paper_totals), study_id)).fetchone()['revision']
+    record(db, actor, 'study.totals_saved', study['code'],
+           {'revision': revision, 'before': before, 'after': paper_totals})
+    return {'paper_totals': paper_totals, 'revision': revision}
 
 
 def save_pair(db, study_id, visitor_code, data, actor, expected_revision):

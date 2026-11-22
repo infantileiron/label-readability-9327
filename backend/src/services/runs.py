@@ -9,7 +9,8 @@ from src.services.audit import record
 from src.services.records import get_study, list_pairs
 
 RUN_COLUMNS = '''r.id, r.study_id, r.revision, r.confidence, r.method, r.checksum, r.status, r.error,
-                 r.requested_by, r.created_at, r.finished_at, s.signed_at, s.signed_by, s.decision, s.note'''
+                 r.progress, r.requested_by, r.created_at, r.finished_at,
+                 s.signed_at, s.signed_by, s.decision, s.note'''
 RUN_FROM = 'FROM analysis_runs r LEFT JOIN signoffs s ON s.run_id = r.id'
 
 
@@ -19,25 +20,31 @@ def snapshot_digest(snapshot):
 
 
 def enqueue(db, study_id, confidence, actor):
+    # The same lock serializes enqueue with pair edits and paper-total edits, so the
+    # fixed snapshot always matches the revision it records.
     study = get_study(db, study_id, lock=True)
     rows = list_pairs(db, study_id)
     if not rows:
         raise HTTPException(422, '请至少登记一条测读记录')
+    # A contradiction never blocks queuing: the worker records which reading-order
+    # group fails to reconcile, and the review page points at the group to fix.
     data = {'study_id': study_id, 'revision': study['revision'], 'confidence': confidence, 'method': METHOD}
     versions = db.execute('''SELECT id, code, exhibit, title, body, type_pt, line_height::float AS line_height
                              FROM label_versions WHERE id IN (%s, %s) ORDER BY id''',
                           (study['old_id'], study['new_id'])).fetchall()
     snapshot = {**data, 'study_code': study['code'], 'study_title': study['title'], 'station': study['station'],
                 'reading_task': study['reading_task'], 'old_id': study['old_id'], 'new_id': study['new_id'],
+                'paper_totals': study['paper_totals'],
                 'versions': versions, 'pairs': rows}
     checksum = snapshot_digest(snapshot)
     present = db.execute('''SELECT id FROM analysis_runs WHERE study_id = %s AND checksum = %s
                             AND status <> 'failed' ORDER BY id DESC LIMIT 1''', (study_id, checksum)).fetchone()
     if present:
         return present
-    row = db.execute('''INSERT INTO analysis_runs(study_id, revision, confidence, method, snapshot, checksum, requested_by)
+    row = db.execute('''INSERT INTO analysis_runs(study_id, revision, confidence, method, snapshot, checksum,
+                                                  requested_by, progress, progress_at)
                         VALUES (%(study_id)s, %(revision)s, %(confidence)s, %(method)s,
-                                %(snapshot)s, %(checksum)s, %(actor)s) RETURNING id''',
+                                %(snapshot)s, %(checksum)s, %(actor)s, NULL, now()) RETURNING id''',
                      {**data, 'snapshot': Jsonb(snapshot), 'checksum': checksum, 'actor': actor}).fetchone()
     record(db, actor, 'analysis.queued', str(row['id']), {'checksum': checksum})
     return row
@@ -71,6 +78,8 @@ def review(db, run_id, decision, note, actor):
     if decision == Decision.PUBLISH:
         if not run['result']['complete']:
             raise HTTPException(409, '没有完整配对，只能退回复测')
+        if run['result'].get('bounds_status') == 'conflict':
+            raise HTTPException(409, '纸表总数与记录矛盾，请先订正总数或补录后再发布')
         if db.execute('''SELECT 1 FROM signoffs s JOIN analysis_runs r ON r.id=s.run_id
                          WHERE r.study_id=%s AND r.revision=%s AND s.decision='publish' ''',
                       (study['id'], study['revision'])).fetchone():

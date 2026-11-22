@@ -7,6 +7,8 @@ x-python: &python
     REDIS_URL: redis://redis:6379/0
     JWT_SECRET: ${JWT_SECRET:-gb-5203-local-demo-jwt-replace-before-deployment}
     SEED_DEMO: ${SEED_DEMO:-true}
+    BATCH_SECONDS: ${BATCH_SECONDS:-2.5}
+    STEP_BUDGET: ${STEP_BUDGET:-400000}
   volumes:
     - artifacts:/artifacts
 services:

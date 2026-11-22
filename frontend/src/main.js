@@ -5,13 +5,13 @@ import { loginPage } from './pages/login.js';
 import { pairForm, pairsPage } from './pages/pairs.js';
 import { reviewPage } from './pages/review.js';
 import { resultPage, runsPage } from './pages/runs.js';
-import { studyForm, versionForm, versionsPage } from './pages/versions.js';
+import { studyForm, totalsForm, versionForm, versionsPage } from './pages/versions.js';
 import { locationPage, navigate } from './router/location.js';
 import { authenticate, clearSession, loadCatalog, selectStudy, store } from './stores/workspace.js';
 import { notify, submitForm } from './utils/forms.js';
 
 const root = document.querySelector('#app');
-const editors = { study: studyForm, version: versionForm, pair: pairForm };
+const editors = { study: studyForm, version: versionForm, pair: pairForm, totals: totalsForm };
 let cancelPoll = () => {};
 let renderCount = 0;
 
@@ -58,7 +58,11 @@ async function render() {
       cancelPoll = pollWhile(async stopped => {
         const next = await request(`/runs/${run.id}`);
         if (stopped()) return false;
-        if (next.status === 'queued') return true;
+        if (next.status === 'queued') {
+          // Keep the live batch progress visible without a full re-render.
+          root.innerHTML = layout(page, resultPage(next));
+          return true;
+        }
         await selectStudy(next.study_id);
         if (!stopped()) root.innerHTML = layout(page, resultPage(next));
         return false;
@@ -78,6 +82,10 @@ function go(page, id) {
 
 const post = (path, data) => request(path, { method: 'POST', data });
 const outcome = value => value === '' ? null : value === 'true';
+const paperTotals = data => ({
+  old_first: { old: Number(data.paper_old_first_old), new: Number(data.paper_old_first_new) },
+  new_first: { old: Number(data.paper_new_first_old), new: Number(data.paper_new_first_new) },
+});
 
 const actions = {
   version: async data => {
@@ -87,11 +95,19 @@ const actions = {
     notify('展签版本已登记');
   },
   study: async data => {
-    const created = await post('/studies', { ...data, old_id: Number(data.old_id), new_id: Number(data.new_id) });
+    const created = await post('/studies', { ...data, old_id: Number(data.old_id), new_id: Number(data.new_id),
+      paper_totals: paperTotals(data) });
     await loadCatalog(created.id);
     store.pairFilter = 'all';
     go('versions');
     notify('复验批次已创建');
+  },
+  totals: async data => {
+    const { id, revision } = store.study;
+    await request(`/studies/${id}/totals?revision=${revision}`, { method: 'PUT', data: { paper_totals: paperTotals(data) } });
+    await selectStudy(id);
+    await render();
+    notify('纸表总数已订正，形成新的样本修订');
   },
   pair: async ({ visitor_code, reading_order, old_ok, new_ok }) => {
     const { id, revision } = store.study;

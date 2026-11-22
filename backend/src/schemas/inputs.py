@@ -26,6 +26,16 @@ class VersionInput(Input):
     line_height: float = Field(ge=1, le=3, multiple_of=0.01)
 
 
+class PaperGroup(Input):
+    old: int = Field(ge=0, le=1000)
+    new: int = Field(ge=0, le=1000)
+
+
+class PaperTotals(Input):
+    old_first: PaperGroup
+    new_first: PaperGroup
+
+
 class StudyInput(Input):
     code: Code
     title: Title
@@ -33,6 +43,7 @@ class StudyInput(Input):
     reading_task: Annotated[str, StringConstraints(strip_whitespace=True, min_length=4, max_length=240)]
     old_id: int = Field(gt=0)
     new_id: int = Field(gt=0)
+    paper_totals: PaperTotals
 
     @model_validator(mode='after')
     def different_versions(self):
@@ -45,6 +56,10 @@ class PairInput(Input):
     reading_order: Order
     old_ok: bool | None = Field(strict=True)
     new_ok: bool | None = Field(strict=True)
+
+
+class StudyPatch(Input):
+    paper_totals: PaperTotals
 
 
 class RunInput(Input):

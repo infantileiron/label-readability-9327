@@ -8,9 +8,10 @@ from src.constants.enums import Role
 from src.controllers.auth import current_user, login, require_role
 from src.controllers.studies import study_detail
 from src.models.database import connect
-from src.schemas.inputs import Credentials, PairInput, ReviewInput, RunInput, StudyInput, VersionInput
+from src.schemas.inputs import (Credentials, PairInput, ReviewInput, RunInput, StudyInput, StudyPatch,
+                                VersionInput)
 from src.services.exports import pairing_csv
-from src.services.records import add_study, add_version, save_pair
+from src.services.records import add_study, add_version, save_pair, set_paper_totals
 from src.services.runs import detail, enqueue, export_data, review
 
 api = APIRouter(prefix='/api')
@@ -51,6 +52,13 @@ def create_study(data: StudyInput, user=Depends(analyst)):
 def study(study_id: int, user=Depends(current_user)):
     with connect() as db:
         return study_detail(db, study_id, user['role'])
+
+
+@api.put('/studies/{study_id}/totals')
+def put_totals(study_id: int, revision: Annotated[int, Query(ge=0)], data: StudyPatch,
+               user=Depends(analyst)):
+    with connect() as db:
+        return set_paper_totals(db, study_id, data.paper_totals.model_dump(), user['username'], revision)
 
 
 @api.put('/studies/{study_id}/pairs/{visitor_code}')

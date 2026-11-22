@@ -1,3 +1,5 @@
+from psycopg.types.json import Jsonb
+
 from src.models.database import connect
 from src.utils.passwords import hash_password
 
@@ -10,6 +12,11 @@ VERSIONS = [
 # Adjacent participant codes have opposite read orders. Each outcome occurs in both orders.
 OUTCOMES = [(True, True)] * 16 + [(True, False)] * 2 + [(False, True)] * 12 + [(False, False)] * 4
 OUTCOMES += [(None, True), (True, None)]
+# The paper sheet kept only per-read-order counts of correct answers. Each group
+# recorded 10 old-label and 15 specimen correct answers. PD-35 (old side) and PD-36
+# (new side) were not carried into the paired table, so each missing side must be a
+# success to reach the paper totals; the only completion is the one documented below.
+PAPER_TOTALS = {'old_first': {'old': 10, 'new': 15}, 'new_first': {'old': 10, 'new': 15}}
 
 
 def seed():
@@ -22,11 +29,13 @@ def seed():
         for version in VERSIONS:
             db.execute('''INSERT INTO label_versions(code,title,exhibit,body,type_pt,line_height)
                           VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT (code) DO NOTHING''', version)
-        study = db.execute('''INSERT INTO studies(code,title,station,reading_task,old_id,new_id,revision)
+        study = db.execute('''INSERT INTO studies(code,title,station,reading_task,old_id,new_id,
+                                                   paper_totals,revision)
                               SELECT 'PD-1121', '青釉执壶展签复验', '常设展 · 二厅',
-                                     '阅读后口述花纹是在上釉前还是上釉后刻出的，答「上釉前」记为成功。', a.id, b.id, 1
+                                     '阅读后口述花纹是在上釉前还是上釉后刻出的，答「上釉前」记为成功。',
+                                     a.id, b.id, %s, 1
                               FROM label_versions a, label_versions b WHERE a.code='YA-01' AND b.code='YA-02'
-                              ON CONFLICT (code) DO NOTHING RETURNING id''').fetchone()
+                              ON CONFLICT (code) DO NOTHING RETURNING id''', (Jsonb(PAPER_TOTALS),)).fetchone()
         if study:
             with db.cursor() as cursor:
                 cursor.executemany('INSERT INTO reading_pairs VALUES (%s,%s,%s,%s,%s,now())',

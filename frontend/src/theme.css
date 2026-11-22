@@ -239,3 +239,15 @@ dialog::backdrop { background: oklch(27% .039 55 / .48); }
   .study-banner { align-items: flex-start; flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; } }
+.totals-grid { border: 1px solid var(--line); border-radius: 3px; padding: 13px 15px 15px; display: grid; gap: 11px; }
+.totals-grid legend { font-weight: 700; color: var(--wine); padding: 0 5px; }
+.totals-sheet { margin-bottom: 16px; padding: 18px 21px; }
+.totals-sheet table { font-size: 13px; }
+.conflict-list { margin: 8px 0 0; padding-left: 20px; color: var(--amber); line-height: 1.65; }
+.bounds-sheet { margin-bottom: 16px; }
+.witness-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 12px; }
+.witness { border-top: 1px solid var(--line); padding-top: 11px; min-width: 0; }
+.witness h3 { font: 700 14px var(--sans); margin-bottom: 5px; }
+.witness .missing-scroll { max-height: 220px; }
+.progress-note { margin: 8px 0; color: var(--muted); font-size: 13px; }
+@media (max-width: 760px) { .witness-grid { grid-template-columns: 1fr; } }
